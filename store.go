@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,7 @@ type VersionMetadata struct {
 	Version    string `json:"version"`
 	FileName   string `json:"file_name"`
 	FileSize   int64  `json:"file_size"`
+	SHA256     string `json:"sha256"`
 	UploadedAt string `json:"uploaded_at"`
 }
 
@@ -79,7 +82,8 @@ func (s *Store) SaveVersion(appName, version string, body io.Reader) (VersionMet
 		return VersionMetadata{}, fmt.Errorf("create temp file: %w", err)
 	}
 
-	size, copyErr := io.Copy(file, body)
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(file, hash), body)
 	closeErr := file.Close()
 	if copyErr != nil {
 		_ = os.Remove(tempPath)
@@ -99,6 +103,7 @@ func (s *Store) SaveVersion(appName, version string, body io.Reader) (VersionMet
 		Version:    version,
 		FileName:   fileName,
 		FileSize:   size,
+		SHA256:     hex.EncodeToString(hash.Sum(nil)),
 		UploadedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -182,6 +187,32 @@ func (s *Store) OpenVersion(appName, version string) (*os.File, VersionMetadata,
 	}
 
 	return nil, VersionMetadata{}, ErrVersionNotFound
+}
+
+func (s *Store) GetVersionMetadata(appName, version string) (VersionMetadata, error) {
+	if !appNamePattern.MatchString(appName) {
+		return VersionMetadata{}, ErrInvalidAppName
+	}
+
+	if _, err := ParseVersion(version); err != nil {
+		return VersionMetadata{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	versions, err := s.loadIndexLocked(appName)
+	if err != nil {
+		return VersionMetadata{}, err
+	}
+
+	for _, item := range versions {
+		if item.Version == version {
+			return item, nil
+		}
+	}
+
+	return VersionMetadata{}, ErrVersionNotFound
 }
 
 func (s *Store) loadIndexLocked(appName string) ([]VersionMetadata, error) {

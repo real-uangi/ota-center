@@ -16,9 +16,12 @@ type Server struct {
 	store *Store
 }
 
-type latestVersionResponse struct {
+type versionResponse struct {
 	AppName     string `json:"app_name"`
 	Version     string `json:"version"`
+	FileName    string `json:"file_name"`
+	FileSize    int64  `json:"file_size"`
+	SHA256      string `json:"sha256"`
 	DownloadURL string `json:"download_url"`
 	UploadedAt  string `json:"uploaded_at"`
 }
@@ -28,6 +31,7 @@ type uploadResponse struct {
 	Version    string `json:"version"`
 	FileName   string `json:"file_name"`
 	FileSize   int64  `json:"file_size"`
+	SHA256     string `json:"sha256"`
 	UploadedAt string `json:"uploaded_at"`
 }
 
@@ -82,6 +86,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Version:    metadata.Version,
 		FileName:   metadata.FileName,
 		FileSize:   metadata.FileSize,
+		SHA256:     metadata.SHA256,
 		UploadedAt: metadata.UploadedAt,
 	})
 }
@@ -91,8 +96,10 @@ func (s *Server) handleOTA(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(trimmed, "/")
 
 	switch {
-	case len(parts) == 2 && parts[1] == "latest_version":
+	case len(parts) == 3 && parts[1] == "versions" && parts[2] == "latest":
 		s.handleLatestVersion(w, r, parts[0])
+	case len(parts) == 3 && parts[1] == "versions":
+		s.handleVersion(w, r, parts[0], parts[2])
 	case len(parts) == 3 && parts[1] == "download":
 		s.handleDownload(w, r, parts[0], parts[2])
 	default:
@@ -107,12 +114,17 @@ func (s *Server) handleLatestVersion(w http.ResponseWriter, r *http.Request, app
 		return
 	}
 
-	writeJSON(w, http.StatusOK, latestVersionResponse{
-		AppName:     appName,
-		Version:     metadata.Version,
-		DownloadURL: s.downloadURL(r, appName, metadata.Version),
-		UploadedAt:  metadata.UploadedAt,
-	})
+	writeJSON(w, http.StatusOK, s.newVersionResponse(r, appName, metadata))
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request, appName, version string) {
+	metadata, err := s.store.GetVersionMetadata(appName, version)
+	if err != nil {
+		s.writeStoreError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.newVersionResponse(r, appName, metadata))
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, appName, version string) {
@@ -155,6 +167,18 @@ func (s *Server) downloadURL(r *http.Request, appName, version string) string {
 	}
 
 	return fmt.Sprintf("%s://%s/ota/%s/download/%s", scheme, r.Host, appName, version)
+}
+
+func (s *Server) newVersionResponse(r *http.Request, appName string, metadata VersionMetadata) versionResponse {
+	return versionResponse{
+		AppName:     appName,
+		Version:     metadata.Version,
+		FileName:    metadata.FileName,
+		FileSize:    metadata.FileSize,
+		SHA256:      metadata.SHA256,
+		DownloadURL: s.downloadURL(r, appName, metadata.Version),
+		UploadedAt:  metadata.UploadedAt,
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

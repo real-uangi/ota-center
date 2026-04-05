@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -57,23 +59,44 @@ func TestUploadLatestAndDownloadFlow(t *testing.T) {
 		t.Fatalf("expected second upload success, got status=%d body=%s", status, body)
 	}
 
-	latestResp, err := http.Get(server.URL + "/ota/demo-app/latest_version")
+	latestResp, err := http.Get(server.URL + "/ota/demo-app/versions/latest")
 	if err != nil {
-		t.Fatalf("latest_version request failed: %v", err)
+		t.Fatalf("latest version request failed: %v", err)
 	}
 	defer latestResp.Body.Close()
 
 	if latestResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected latest_version success, got %d", latestResp.StatusCode)
+		t.Fatalf("expected latest version success, got %d", latestResp.StatusCode)
 	}
 
-	var latest latestVersionResponse
+	var latest versionResponse
 	if err := json.NewDecoder(latestResp.Body).Decode(&latest); err != nil {
-		t.Fatalf("decode latest_version response: %v", err)
+		t.Fatalf("decode latest version response: %v", err)
 	}
 
 	if latest.Version != "v1.3-202604011000" {
 		t.Fatalf("expected latest version to be v1.3-202604011000, got %s", latest.Version)
+	}
+	if latest.SHA256 != sha256Hex([]byte("firmware-v2")) {
+		t.Fatalf("unexpected sha256 for latest version: %s", latest.SHA256)
+	}
+
+	versionResp, err := http.Get(server.URL + "/ota/demo-app/versions/v1.2-202604051230")
+	if err != nil {
+		t.Fatalf("version metadata request failed: %v", err)
+	}
+	defer versionResp.Body.Close()
+
+	if versionResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected version metadata success, got %d", versionResp.StatusCode)
+	}
+
+	var versionInfo versionResponse
+	if err := json.NewDecoder(versionResp.Body).Decode(&versionInfo); err != nil {
+		t.Fatalf("decode version metadata response: %v", err)
+	}
+	if versionInfo.SHA256 != sha256Hex([]byte("firmware-v1")) {
+		t.Fatalf("unexpected sha256 for stored version: %s", versionInfo.SHA256)
 	}
 
 	downloadResp, err := http.Get(latest.DownloadURL)
@@ -130,14 +153,24 @@ func TestNotFoundCases(t *testing.T) {
 	}, NewStore(dataDir)).routes())
 	defer server.Close()
 
-	latestResp, err := http.Get(server.URL + "/ota/unknown/latest_version")
+	latestResp, err := http.Get(server.URL + "/ota/unknown/versions/latest")
 	if err != nil {
-		t.Fatalf("latest_version request failed: %v", err)
+		t.Fatalf("latest version request failed: %v", err)
 	}
 	defer latestResp.Body.Close()
 
 	if latestResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected latest_version 404, got %d", latestResp.StatusCode)
+		t.Fatalf("expected latest version 404, got %d", latestResp.StatusCode)
+	}
+
+	versionResp, err := http.Get(server.URL + "/ota/unknown/versions/v1.2-202604051230")
+	if err != nil {
+		t.Fatalf("version metadata request failed: %v", err)
+	}
+	defer versionResp.Body.Close()
+
+	if versionResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected version metadata 404, got %d", versionResp.StatusCode)
 	}
 
 	downloadResp, err := http.Get(server.URL + "/ota/unknown/download/v1.2-202604051230")
@@ -193,4 +226,9 @@ func uploadBinary(t *testing.T, baseURL, key, appName, version string, content [
 	}
 
 	return resp.StatusCode, string(responseBody)
+}
+
+func sha256Hex(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }
