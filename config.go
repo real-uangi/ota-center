@@ -1,9 +1,11 @@
 package main
 
 import (
-	"errors"
+	"log"
 	"os"
 )
+
+const defaultAdminKey = "admin12345"
 
 type Config struct {
 	Port     string
@@ -13,13 +15,13 @@ type Config struct {
 
 func loadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Port:     getenvDefault("PORT", "8080"),
+		Port:     getenvDefault("PORT", "8765"),
 		DataDir:  getenvDefault("OTA_DATA_DIR", "data"),
-		AdminKey: os.Getenv("OTA_ADMIN_KEY"),
+		AdminKey: getenvDefault("OTA_ADMIN_KEY", defaultAdminKey),
 	}
 
-	if cfg.AdminKey == "" {
-		return Config{}, errors.New("OTA_ADMIN_KEY is required")
+	if cfg.AdminKey == defaultAdminKey {
+		log.Println("AdminKey is defaulted to 'admin', please change your admin key")
 	}
 
 	return cfg, nil
