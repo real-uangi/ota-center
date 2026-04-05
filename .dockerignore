@@ -1,6 +1,2 @@
-.git
-.github
-.idea
-*.md
-data
-*.test
+**
+!ota-center
